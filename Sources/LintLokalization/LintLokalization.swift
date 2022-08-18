@@ -10,7 +10,10 @@ public struct Main: ParsableCommand {
   var reporter: Reporters = .xcode
   
   @Option(help: "Pattern which follows a string literal to be matches.")
-  var pattern: String = ".localized("
+  var pattern: String = ".localized"
+  
+  @Option(help: "Should XCode display warnings or compile-time errors.")
+  var severity: ViolationSeverity = .warning
   
   public init() {}
   
@@ -34,7 +37,8 @@ public struct Main: ParsableCommand {
         let violations = try parseAndValidateSourceCodeFile(
           file: file,
           localizations: mapping,
-          pattern: pattern)
+          pattern: pattern,
+          severity: severity)
         print("\(index + 1). Processing: ", file.lightCyan)
         for violation in violations {
           print(reporter.report(violation: violation))
@@ -142,12 +146,14 @@ struct Violation: Hashable {
   let line: Int
   let column: Int
   let key: String
+  let severity: ViolationSeverity
 }
 
 func parseAndValidateSourceCodeFile(
   file: String,
   localizations: [String: String],
-  pattern: String
+  pattern: String,
+  severity: ViolationSeverity
 ) throws -> Set<Violation> {
   var violations = Set<Violation>()
   let code = try file.loadFile
@@ -190,7 +196,8 @@ func parseAndValidateSourceCodeFile(
           file: file,
           line: line,
           column: column,
-          key: key))
+          key: key,
+          severity: severity))
         nextChar()
         continue
       }
@@ -239,6 +246,11 @@ enum Reporters: String, ExpressibleByArgument, CaseIterable {
       return XCodeReporter()
     }
   }
+}
+
+enum ViolationSeverity: String, ExpressibleByArgument {
+  case warning
+  case error
 }
 
 public func benchmark(_ run: () throws -> Void) rethrows -> Double {
