@@ -9,9 +9,11 @@ public struct Main: ParsableCommand {
   public init() {}
   
   public func run() throws {
+    let reporter: Reporter = XCodeReporter()
+    
     let (time1, contents) = try benchmark { () -> Set<String> in
       let fileManager = FileManager.default
-      let workingDirectory = "/Users/tony/ios/facelift-ios/Facelift"
+      let workingDirectory = fileManager.currentDirectoryPath
       let contents = try loadContentsOfADirectory(
         path: workingDirectory,
         fileManager: fileManager)
@@ -23,14 +25,14 @@ public struct Main: ParsableCommand {
     let (time3, errorCount) = try benchmark { () -> Int in
       var errorCount = 0
       for (index, file) in contents.enumerated() {
-        let unknownKeys = try parseAndValidateSourceCodeFile(
+        let violations = try parseAndValidateSourceCodeFile(
           file: file,
           localizations: mapping)
         print("\(index + 1). Processing: ", file.lightCyan)
-        for key in unknownKeys {
-          print("  -".red, key.red)
+        for violation in violations {
+          print(reporter.report(violation: violation))
         }
-        errorCount += unknownKeys.count
+        errorCount += violations.count
       }
       return errorCount
     }
@@ -128,41 +130,82 @@ func loadLocalizationFile(
   return mapping
 }
 
+struct Violation: Hashable {
+  let file: String
+  let line: Int
+  let column: Int
+  let key: String
+}
+
 func parseAndValidateSourceCodeFile(
   file: String,
   localizations: [String: String]
-) throws -> Set<String> {
-  var keys = Set<String>()
+) throws -> Set<Violation> {
+  var violations = Set<Violation>()
   let code = try file.loadFile
   var index = code.startIndex
+  var line = 1
+  var column = 1
+  
+  func nextChar() {
+    index = code.index(after: index)
+    if index == code.endIndex { return }
+    if code[index].isNewline {
+      line = 1
+      column += 1
+    } else {
+      line += 1
+    }
+  }
+  
   while index != code.endIndex {
     if code[index] == "\"" {
-      index = code.index(after: index)
+      nextChar()
       let keyStartIndex: String.Index
       let keyEndIndex: String.Index
       keyStartIndex = index
       while index != code.endIndex && code[index] != "\"" {
-        index = code.index(after: index)
+        nextChar()
       }
       guard index != code.endIndex else { break }
       keyEndIndex = index
       let key = String(code[keyStartIndex..<keyEndIndex])
-      index = code.index(after: index)
+      nextChar()
       let pattern = ".localized("
       guard code[index...].count >= pattern.count else { break }
       guard code[index..<code.index(index, offsetBy: pattern.count)] == pattern else {
-        index = code.index(index, offsetBy: pattern.count)
+        nextChar()
         continue
       }
       guard localizations.keys.contains(key) else {
-        keys.insert(key)
-        index = code.index(after: index)
+        violations.insert(.init(
+          file: file,
+          line: line,
+          column: column,
+          key: key))
+        nextChar()
         continue
       }
     }
-    index = code.index(after: index)
+    nextChar()
   }
-  return keys
+  return violations
+}
+
+protocol Reporter {
+  func report(violation: Violation) -> String
+}
+
+struct XCodeReporter: Reporter {
+  func report(violation: Violation) -> String {
+    [
+      "\(violation.file):",
+      "\(violation.column):\(violation.line): ",
+      "warning: ",
+      "Unknown key: ",
+      violation.key
+    ].joined(separator: "")
+  }
 }
 
 public func benchmark(_ run: () throws -> Void) rethrows -> Double {
