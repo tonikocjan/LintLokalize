@@ -216,7 +216,7 @@ struct XCodeReporter: Reporter {
     [
       "\(violation.file):",
       "\(violation.column):\(violation.line): ",
-      "warning: ",
+      "\(violation.severity.rawValue): ",
       "Unknown key: ",
       violation.key
     ].joined(separator: "")
