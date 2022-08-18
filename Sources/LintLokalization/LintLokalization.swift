@@ -6,10 +6,16 @@ public struct Main: ParsableCommand {
   @Argument
   var localizationFile: String
   
+  @Option(help: "Available reporters: \(Reporters.allCases.map { $0.defaultValueDescription }).")
+  var reporter: Reporters = .xcode
+  
+  @Option(help: "Pattern which follows a string literal to be matches.")
+  var pattern: String = ".localized("
+  
   public init() {}
   
   public func run() throws {
-    let reporter: Reporter = XCodeReporter()
+    let reporter: Reporter = reporter.get()
     
     let (time1, contents) = try benchmark { () -> Set<String> in
       let fileManager = FileManager.default
@@ -27,7 +33,8 @@ public struct Main: ParsableCommand {
       for (index, file) in contents.enumerated() {
         let violations = try parseAndValidateSourceCodeFile(
           file: file,
-          localizations: mapping)
+          localizations: mapping,
+          pattern: pattern)
         print("\(index + 1). Processing: ", file.lightCyan)
         for violation in violations {
           print(reporter.report(violation: violation))
@@ -139,7 +146,8 @@ struct Violation: Hashable {
 
 func parseAndValidateSourceCodeFile(
   file: String,
-  localizations: [String: String]
+  localizations: [String: String],
+  pattern: String
 ) throws -> Set<Violation> {
   var violations = Set<Violation>()
   let code = try file.loadFile
@@ -171,7 +179,7 @@ func parseAndValidateSourceCodeFile(
       keyEndIndex = index
       let key = String(code[keyStartIndex..<keyEndIndex])
       nextChar()
-      let pattern = ".localized("
+      
       guard code[index...].count >= pattern.count else { break }
       guard code[index..<code.index(index, offsetBy: pattern.count)] == pattern else {
         nextChar()
@@ -205,6 +213,31 @@ struct XCodeReporter: Reporter {
       "Unknown key: ",
       violation.key
     ].joined(separator: "")
+  }
+}
+
+struct CommandLineReporter: Reporter {
+  func report(violation: Violation) -> String {
+    [
+      "  ⚠️  ",
+      "[\(violation.line),\(violation.column)] ",
+      "\(violation.file): ",
+      "Unknown key: \(violation.key)",
+    ].joined(separator: "").red
+  }
+}
+
+enum Reporters: String, ExpressibleByArgument, CaseIterable {
+  case cmd
+  case xcode
+  
+  func get() -> Reporter {
+    switch self {
+    case .cmd:
+      return CommandLineReporter()
+    case .xcode:
+      return XCodeReporter()
+    }
   }
 }
 
