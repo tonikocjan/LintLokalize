@@ -6,6 +6,6 @@
 //
 
 import Foundation
-import LintLokalization
+import Lib
 
 Main.main()

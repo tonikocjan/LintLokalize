@@ -7,11 +7,11 @@ let package = Package(
   name: "LintLokalization",
   products: [
     .library(
-      name: "LintLokalization",
-      targets: ["LintLokalization"]),
+      name: "Lib",
+      targets: ["Lib"]),
     .executable(
-      name: "Run",
-      targets: ["Run"])
+      name: "LintLokalize",
+      targets: ["LintLokalize"])
   ],
   dependencies: [
     .package(
@@ -23,19 +23,19 @@ let package = Package(
   ],
   targets: [
     .target(
-      name: "LintLokalization",
+      name: "Lib",
       dependencies: [
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
         "Rainbow",
       ]),
     .executableTarget(
-      name: "Run",
+      name: "LintLokalize",
       dependencies: [
-        "LintLokalization",
+        "Lib",
       ]
     ),
     .testTarget(
       name: "LintLokalizationTests",
-      dependencies: ["LintLokalization"]),
+      dependencies: ["Lib"]),
   ]
 )
