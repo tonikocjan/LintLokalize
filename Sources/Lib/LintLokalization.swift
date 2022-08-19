@@ -25,7 +25,7 @@ public struct Main: ParsableCommand {
   var benchmarkMode: Bool = false
   
   @Option(help: "Only applicable when `benchmarkMode = true`.")
-  var benchmarkRepatCount: Int = 100
+  var benchmarkRepeatCount: Int = 100
   
   public init() {}
   
@@ -47,7 +47,7 @@ public struct Main: ParsableCommand {
       let linesProcessedCount: Int
     }
     
-    let (time3, output) = try benchmark(repeat: benchmarkMode ? benchmarkRepatCount : 1) { () -> ThreadOutput in
+    let (time3, output) = try benchmark(repeat: benchmarkMode ? benchmarkRepeatCount : 1) { () -> ThreadOutput in
       let semaphore = DispatchSemaphore(value: 0)
       let reporter = reporter.get()
       
