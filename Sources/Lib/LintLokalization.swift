@@ -15,11 +15,21 @@ public struct Main: ParsableCommand {
   @Option(help: "Should XCode display warnings or compile-time errors.")
   var severity: ViolationSeverity = .warning
   
+  @Option(help: "Should the reporter output violations as they are found or must all the violations be collected before generating a report.")
+  var realtime: Bool = false // @TODO: - Not yet used
+  
+  @Option(help: "Number of working threads.")
+  var threads: Int = 8
+  
+  @Option(help: "Run LintLokalize in benchmark mode.")
+  var benchmarkMode: Bool = false
+  
+  @Option(help: "Only applicable when `benchmarkMode = true`.")
+  var benchmarkRepeatCount: Int = 100
+  
   public init() {}
   
   public func run() throws {
-    let reporter: Reporter = reporter.get()
-    
     let (time1, contents) = try benchmark { () -> Set<String> in
       let fileManager = FileManager.default
       let workingDirectory = fileManager.currentDirectoryPath
@@ -31,26 +41,102 @@ public struct Main: ParsableCommand {
     let (time2, mapping) = try benchmark {
       try loadLocalizationFile(path: localizationFile)
     }
-    let (time3, errorCount) = try benchmark { () -> Int in
-      var errorCount = 0
-      for (index, file) in contents.enumerated() {
-        let violations = try parseAndValidateSourceCodeFile(
-          file: file,
-          localizations: mapping,
-          pattern: pattern,
-          severity: severity)
-        print("\(index + 1). Processing: ", file.lightCyan)
-        for violation in violations {
-          print(reporter.report(violation: violation))
+    
+    struct ThreadOutput {
+      let errorCount: Int
+      let linesProcessedCount: Int
+    }
+    
+    let (time3, output) = try benchmark(repeat: benchmarkMode ? benchmarkRepeatCount : 1) { () -> ThreadOutput in
+      let semaphore = DispatchSemaphore(value: 0)
+      let reporter = reporter.get()
+      
+      func work(
+        startIndex: Set<String>.Index,
+        count: Int
+      ) throws -> ThreadOutput {
+        defer { semaphore.signal() }
+        var errorCount = 0
+        var linesProcessedCount = 0
+        for index in 0..<count {
+          var innerLinesProcessedCount = 0
+          let file = contents[contents.index(startIndex, offsetBy: index)]
+          let violations = try parseAndValidateSourceCodeFile(
+            file: file,
+            localizations: mapping,
+            pattern: pattern,
+            severity: severity,
+            linesProcessedCount: &innerLinesProcessedCount)
+          
+          if !benchmarkMode {
+            print("Processing ", "\(file):".lightCyan)
+            for violation in violations {
+              print(reporter.report(violation: violation))
+            }
+          }
+          
+          linesProcessedCount += innerLinesProcessedCount
+          errorCount += violations.count
         }
-        errorCount += violations.count
+        
+        return .init(
+          errorCount: errorCount,
+          linesProcessedCount: linesProcessedCount
+        )
       }
-      return errorCount
+      
+      
+      let workPerThread = contents.count / threads
+      var results = [Result<ThreadOutput, Error>?](repeating: nil, count: threads)
+      for thread in 0..<threads {
+        let count = thread == threads - 1 ? contents.count - workPerThread * thread : workPerThread
+        let thread = Thread {
+          do {
+            let errorCount = try work(
+              startIndex: contents.index(contents.startIndex, offsetBy: workPerThread * thread),
+              count: count
+            )
+            results[thread] = .success(errorCount)
+          } catch {
+            results[thread] = .failure(error)
+          }
+        }
+        thread.start()
+      }
+      
+      for _ in 0..<threads { semaphore.wait() }
+      
+      var errorCount = 0
+      var processedLinesCount = 0
+      for result in results {
+        switch result! {
+        case .success(let output):
+          errorCount += output.errorCount
+          processedLinesCount += output.linesProcessedCount
+        case .failure(let error):
+          throw error
+        }
+      }
+      return .init(errorCount: errorCount, linesProcessedCount: processedLinesCount)
     }
-    if errorCount > 0 {
-      print("❗️ Found \(errorCount) unresolved localizations!".bold.red)
+    if output.errorCount > 0 {
+      print("❗️ Found \(output.errorCount) unresolved localizations!".bold.red)
     }
-    print("Executed in: \(time1 + time2 + time3)".magenta.italic)
+    
+    guard benchmarkMode else {
+      Foundation.exit(Int32(output.errorCount))
+    }
+    print(
+      [
+        "Executed in: \(time1 + time2 + time3)s".lightBlue.italic,
+        "  - Load directory recursively: \(time1)s".cyan.italic,
+        "  - Load localization file    : \(time2)s".cyan.italic,
+        "  - Parse and validate sources: \(time3)s".cyan.italic,
+        "    > Processed \(contents.count) files, \(output.linesProcessedCount) loc".cyan.italic,
+        "    > Throughput [files/s]: \(Int(Double(contents.count) / time3))".cyan.italic,
+        "    > Throughput [lines/s]: \(Int(Double(output.linesProcessedCount) / time3))".cyan.italic,
+      ].joined(separator: "\n")
+    )
   }
 }
 
@@ -153,7 +239,8 @@ func parseAndValidateSourceCodeFile(
   file: String,
   localizations: [String: String],
   pattern: String,
-  severity: ViolationSeverity
+  severity: ViolationSeverity,
+  linesProcessedCount: inout Int
 ) throws -> Set<Violation> {
   var violations = Set<Violation>()
   let code = try file.loadFile
@@ -165,10 +252,10 @@ func parseAndValidateSourceCodeFile(
     index = code.index(after: index)
     if index == code.endIndex { return }
     if code[index].isNewline {
-      line = 1
-      column += 1
-    } else {
+      column = 1
       line += 1
+    } else {
+      column += 1
     }
   }
   
@@ -204,6 +291,7 @@ func parseAndValidateSourceCodeFile(
     }
     nextChar()
   }
+  linesProcessedCount = line
   return violations
 }
 
@@ -215,7 +303,7 @@ struct XCodeReporter: Reporter {
   func report(violation: Violation) -> String {
     [
       "\(violation.file):",
-      "\(violation.column):\(violation.line): ",
+      "\(violation.line):\(violation.column): ",
       "\(violation.severity.rawValue): ",
       "Unknown key: ",
       violation.key
@@ -263,6 +351,23 @@ public func benchmark<T>(_ run: () throws -> T) rethrows -> (time: Double, value
   let current = currentTime()
   let value = try run()
   return (currentTime() - current, value)
+}
+
+public func benchmark<T>(repeat: Int, _ run: () throws -> T) rethrows -> (averageTime: Double, value: T) {
+  if `repeat` <= 1 {
+    let (time, result) = try benchmark(run)
+    return (time, result)
+  }
+  var sum = 0.0
+  for i in 0..<`repeat` {
+    let current = currentTime()
+    let value = try run()
+    sum += currentTime() - current
+    if i + 1 == `repeat` {
+      return (sum / Double(`repeat`), value)
+    }
+  }
+  fatalError()
 }
 
 fileprivate func currentTime() -> Double {

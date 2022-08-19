@@ -77,7 +77,7 @@ XCode will automatically display warnings for all unknown localization keys.
 Instead of warnings, you can configure `LintLokalize` to output errors. Severity is controlled by the `--severity` option:
 
 ```bash
-MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --severity error
+MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.strings --severity error
 1. Processing:  MyProject/File1.swift
 2. Processing:  MyProject/File2.swift
 3. Processing:  MyProject/File3.swift
@@ -100,7 +100,7 @@ When doing so, XCode will mark the build as failed if any localization is unreso
 
 
 ```bash
-MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --reported cmd
+MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --reporter cmh
 1. Processing:  MyProject/File1.swift
 2. Processing:  MyProject/File2.swift
 3. Processing:  MyProject/File3.swift
