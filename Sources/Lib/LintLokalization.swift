@@ -123,7 +123,9 @@ public struct Main: ParsableCommand {
       print("❗️ Found \(output.errorCount) unresolved localizations!".bold.red)
     }
     
-    guard benchmarkMode else { return }
+    guard benchmarkMode else {
+      Foundation.exit(Int32(output.errorCount))
+    }
     print(
       [
         "Executed in: \(time1 + time2 + time3)s".lightBlue.italic,
