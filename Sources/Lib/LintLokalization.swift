@@ -19,7 +19,7 @@ public struct Main: ParsableCommand {
   var realtime: Bool = false // @TODO: - Not yet used
   
   @Option(help: "Number of working threads.")
-  var threads: Int = 1
+  var threads: Int = 8
   
   public init() {}
   
@@ -29,7 +29,6 @@ public struct Main: ParsableCommand {
     let (time1, contents) = try benchmark { () -> Set<String> in
       let fileManager = FileManager.default
       let workingDirectory = fileManager.currentDirectoryPath
-//      let workingDirectory = "/Users/tony/swift/XcodeBenchmark"
       let contents = try loadContentsOfADirectory(
         path: workingDirectory,
         fileManager: fileManager)
