@@ -15,6 +15,12 @@ public struct Main: ParsableCommand {
   @Option(help: "Should XCode display warnings or compile-time errors.")
   var severity: ViolationSeverity = .warning
   
+  @Option(help: "Should the reporter output violations as they are found or must all the violations be collected before generating a report.")
+  var realtime: Bool = false // @TODO: - Not yet used
+  
+  @Option(help: "Number of working threads.")
+  var threads: Int = 1
+  
   public init() {}
   
   public func run() throws {
@@ -23,6 +29,7 @@ public struct Main: ParsableCommand {
     let (time1, contents) = try benchmark { () -> Set<String> in
       let fileManager = FileManager.default
       let workingDirectory = fileManager.currentDirectoryPath
+//      let workingDirectory = "/Users/tony/swift/XcodeBenchmark"
       let contents = try loadContentsOfADirectory(
         path: workingDirectory,
         fileManager: fileManager)
@@ -32,25 +39,73 @@ public struct Main: ParsableCommand {
       try loadLocalizationFile(path: localizationFile)
     }
     let (time3, errorCount) = try benchmark { () -> Int in
-      var errorCount = 0
-      for (index, file) in contents.enumerated() {
-        let violations = try parseAndValidateSourceCodeFile(
-          file: file,
-          localizations: mapping,
-          pattern: pattern,
-          severity: severity)
-        print("\(index + 1). Processing: ", file.lightCyan)
-        for violation in violations {
-          print(reporter.report(violation: violation))
+      let semaphore = DispatchSemaphore(value: 0)
+      
+      func work(
+        startIndex: Set<String>.Index,
+        count: Int
+      ) throws -> Int {
+        defer { semaphore.signal() }
+        var errorCount = 0
+        for index in 0..<count {
+          let file = contents[contents.index(startIndex, offsetBy: index)]
+          let violations = try parseAndValidateSourceCodeFile(
+            file: file,
+            localizations: mapping,
+            pattern: pattern,
+            severity: severity)
+          print("Processing ", "\(file):".lightCyan)
+          for violation in violations {
+            print(reporter.report(violation: violation))
+          }
+          errorCount += violations.count
         }
-        errorCount += violations.count
+        
+        return errorCount
+      }
+      
+      let workPerThread = contents.count / threads
+      var results = [Result<Int, Error>?](repeating: nil, count: threads)
+      for thread in 0..<threads {
+        let count = thread == threads - 1 ? contents.count - workPerThread * thread : workPerThread
+        let thread = Thread {
+          do {
+            let errorCount = try work(
+              startIndex: contents.index(contents.startIndex, offsetBy: workPerThread * thread),
+              count: count
+            )
+            results[thread] = .success(errorCount)
+          } catch {
+            results[thread] = .failure(error)
+          }
+        }
+        thread.start()
+      }
+      
+      for _ in 0..<threads { semaphore.wait() }
+      
+      var errorCount = 0
+      for result in results {
+        switch result! {
+        case .success(let count):
+          errorCount += count
+        case .failure(let error):
+          throw error
+        }
       }
       return errorCount
     }
     if errorCount > 0 {
       print("❗️ Found \(errorCount) unresolved localizations!".bold.red)
     }
-    print("Executed in: \(time1 + time2 + time3)".magenta.italic)
+    print("Executed in: \(time1 + time2 + time3)s".lightBlue.italic)
+    print(
+      [
+        "  - Load directory recursively: \(time1)s".cyan.italic,
+        "  - Load localizaition file   : \(time2)s".cyan.italic,
+        "  - Parse and validate sources: \(time3)s @ \(Double(contents.count) / time3) file/second".cyan.italic,
+      ].joined(separator: "\n")
+    )
   }
 }
 
