@@ -72,8 +72,10 @@ public struct Main: ParsableCommand {
           errorCount += violations.count
         }
         
-        print(linesProcessedCount)
-        return .init(errorCount: errorCount, linesProcessedCount: linesProcessedCount)
+        return .init(
+          errorCount: errorCount,
+          linesProcessedCount: linesProcessedCount
+        )
       }
       
       
@@ -117,7 +119,7 @@ public struct Main: ParsableCommand {
     print(
       [
         "  - Load directory recursively: \(time1)s".cyan.italic,
-        "  - Load localizaition file   : \(time2)s".cyan.italic,
+        "  - Load localization file    : \(time2)s".cyan.italic,
         "  - Parse and validate sources: \(time3)s".cyan.italic,
         "    > Processed \(contents.count) files, \(output.linesProcessedCount) loc".cyan.italic,
         "    > Throughput [files/s]: \(Int(Double(contents.count) / time3))".cyan.italic,
