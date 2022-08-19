@@ -21,11 +21,15 @@ public struct Main: ParsableCommand {
   @Option(help: "Number of working threads.")
   var threads: Int = 8
   
+  @Option(help: "Run LintLokalize in benchmark mode.")
+  var benchmarkMode: Bool = false
+  
+  @Option(help: "Only applicable when `benchmarkMode = true`.")
+  var benchmarkRepatCount: Int = 100
+  
   public init() {}
   
   public func run() throws {
-    let reporter: Reporter = reporter.get()
-    
     let (time1, contents) = try benchmark { () -> Set<String> in
       let fileManager = FileManager.default
       let workingDirectory = fileManager.currentDirectoryPath
@@ -43,8 +47,9 @@ public struct Main: ParsableCommand {
       let linesProcessedCount: Int
     }
     
-    let (time3, output) = try benchmark { () -> ThreadOutput in
+    let (time3, output) = try benchmark(repeat: benchmarkMode ? benchmarkRepatCount : 1) { () -> ThreadOutput in
       let semaphore = DispatchSemaphore(value: 0)
+      let reporter = reporter.get()
       
       func work(
         startIndex: Set<String>.Index,
@@ -62,9 +67,12 @@ public struct Main: ParsableCommand {
             pattern: pattern,
             severity: severity,
             linesProcessedCount: &innerLinesProcessedCount)
-          print("Processing ", "\(file):".lightCyan)
-          for violation in violations {
-            print(reporter.report(violation: violation))
+          
+          if !benchmarkMode {
+            print("Processing ", "\(file):".lightCyan)
+            for violation in violations {
+              print(reporter.report(violation: violation))
+            }
           }
           
           linesProcessedCount += innerLinesProcessedCount
@@ -114,9 +122,11 @@ public struct Main: ParsableCommand {
     if output.errorCount > 0 {
       print("❗️ Found \(output.errorCount) unresolved localizations!".bold.red)
     }
-    print("Executed in: \(time1 + time2 + time3)s".lightBlue.italic)
+    
+    guard benchmarkMode else { return }
     print(
       [
+        "Executed in: \(time1 + time2 + time3)s".lightBlue.italic,
         "  - Load directory recursively: \(time1)s".cyan.italic,
         "  - Load localization file    : \(time2)s".cyan.italic,
         "  - Parse and validate sources: \(time3)s".cyan.italic,
@@ -339,6 +349,23 @@ public func benchmark<T>(_ run: () throws -> T) rethrows -> (time: Double, value
   let current = currentTime()
   let value = try run()
   return (currentTime() - current, value)
+}
+
+public func benchmark<T>(repeat: Int, _ run: () throws -> T) rethrows -> (averageTime: Double, value: T) {
+  if `repeat` <= 1 {
+    let (time, result) = try benchmark(run)
+    return (time, result)
+  }
+  var sum = 0.0
+  for i in 0..<`repeat` {
+    let current = currentTime()
+    let value = try run()
+    sum += currentTime() - current
+    if i + 1 == `repeat` {
+      return (sum / Double(`repeat`), value)
+    }
+  }
+  fatalError()
 }
 
 fileprivate func currentTime() -> Double {
