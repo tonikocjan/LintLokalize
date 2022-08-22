@@ -221,7 +221,14 @@ func loadLocalizationFile(
       var valueEndIndex: String.Index
       index = contentsOfFile.index(after: index)
       valueStartIndex = index
-      while contentsOfFile.endIndex != index && contentsOfFile[index] != "\"" {
+      while contentsOfFile.endIndex != index {
+        if contentsOfFile[index] == "\\" {
+          index = contentsOfFile.index(after: index)
+          if index != contentsOfFile.endIndex && contentsOfFile[index] == "\"" {
+            index = contentsOfFile.index(after: index)
+            continue
+          }
+        } else if contentsOfFile[index] == "\"" { break }
         index = contentsOfFile.index(after: index)
       }
       valueEndIndex = index
