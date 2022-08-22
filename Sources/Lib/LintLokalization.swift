@@ -6,20 +6,23 @@ public struct Main: ParsableCommand {
   @Argument
   var localizationFile: String
   
-  @Option(help: "Available reporters: \(Reporters.allCases.map { $0.defaultValueDescription }).")
+  @Option(help: "Available reporters: \(Reporters.allCases.map { $0.rawValue }).")
   var reporter: Reporters = .xcode
   
-  @Option(help: "Pattern which follows a string literal to be matches.")
-  var pattern: String = ".localized"
+  @Option(help: "Regular expressions to be matched.")
+  var patterns: [String] = [#"NSLocalizedString\("([^"]*)""#, #""([^"]*)".localized"#]
   
   @Option(help: "Should XCode display warnings or compile-time errors.")
   var severity: ViolationSeverity = .warning
   
   @Option(help: "Should the reporter output violations as they are found or must all the violations be collected before generating a report.")
-  var realtime: Bool = false // @TODO: - Not yet used
+  var realtime: Bool = true // @TODO: - Not yet used
   
   @Option(help: "Number of working threads.")
   var threads: Int = 8
+  
+  @Option(help: "Should LintLokalize report exact locations of errors (note that exact locations require a bit more work).")
+  var reportExactLocation: Bool = true
   
   @Option(help: "Run LintLokalize in benchmark mode.")
   var benchmarkMode: Bool = false
@@ -50,12 +53,22 @@ public struct Main: ParsableCommand {
     let (time3, output) = try benchmark(repeat: benchmarkMode ? benchmarkRepeatCount : 1) { () -> ThreadOutput in
       let semaphore = DispatchSemaphore(value: 0)
       let reporter = reporter.get()
+      let regexes = try patterns.map {
+        try NSRegularExpression(
+          pattern: $0,
+          options: [
+//            .dotMatchesLineSeparators,
+//            .anchorsMatchLines,
+          ])
+      }
       
       func work(
         startIndex: Set<String>.Index,
         count: Int
       ) throws -> ThreadOutput {
-        defer { semaphore.signal() }
+        defer {
+          semaphore.signal()
+        }
         var errorCount = 0
         var linesProcessedCount = 0
         for index in 0..<count {
@@ -64,9 +77,11 @@ public struct Main: ParsableCommand {
           let violations = try parseAndValidateSourceCodeFile(
             file: file,
             localizations: mapping,
-            pattern: pattern,
+            regexes: regexes,
             severity: severity,
-            linesProcessedCount: &innerLinesProcessedCount)
+            reportExactLocation: reportExactLocation,
+            linesProcessedCount: &innerLinesProcessedCount,
+            benchmark: benchmarkMode)
           
           if !benchmarkMode {
             print("Processing ", "\(file):".lightCyan)
@@ -84,7 +99,6 @@ public struct Main: ParsableCommand {
           linesProcessedCount: linesProcessedCount
         )
       }
-      
       
       let workPerThread = contents.count / threads
       var results = [Result<ThreadOutput, Error>?](repeating: nil, count: threads)
@@ -105,6 +119,7 @@ public struct Main: ParsableCommand {
       }
       
       for _ in 0..<threads { semaphore.wait() }
+      precondition(results.allSatisfy { $0 != nil })
       
       var errorCount = 0
       var processedLinesCount = 0
@@ -180,7 +195,7 @@ func loadContentsOfADirectory(
 func loadLocalizationFile(
   path: String
 ) throws -> [String: String] {
-  let contentsOfFile = try path.loadFile
+  let contentsOfFile = try path.loadFile()
   var mapping = [String: String]()
   var index = contentsOfFile.startIndex
   while index != contentsOfFile.endIndex {
@@ -235,63 +250,67 @@ struct Violation: Hashable {
   let severity: ViolationSeverity
 }
 
+enum ViolationSeverity: String, ExpressibleByArgument {
+  case warning
+  case error
+}
+
 func parseAndValidateSourceCodeFile(
   file: String,
   localizations: [String: String],
-  pattern: String,
+  regexes: [NSRegularExpression],
   severity: ViolationSeverity,
-  linesProcessedCount: inout Int
+  reportExactLocation: Bool,
+  linesProcessedCount: inout Int,
+  benchmark: Bool
 ) throws -> Set<Violation> {
   var violations = Set<Violation>()
-  let code = try file.loadFile
-  var index = code.startIndex
-  var line = 1
-  var column = 1
+  let code = try file.loadFile()
   
-  func nextChar() {
-    index = code.index(after: index)
-    if index == code.endIndex { return }
-    if code[index].isNewline {
-      column = 1
-      line += 1
-    } else {
-      column += 1
-    }
-  }
-  
-  while index != code.endIndex {
-    if code[index] == "\"" {
-      nextChar()
-      let keyStartIndex: String.Index
-      let keyEndIndex: String.Index
-      keyStartIndex = index
-      while index != code.endIndex && code[index] != "\"" {
-        nextChar()
-      }
-      guard index != code.endIndex else { break }
-      keyEndIndex = index
-      let key = String(code[keyStartIndex..<keyEndIndex])
-      nextChar()
-      
-      guard code[index...].count >= pattern.count else { break }
-      guard code[index..<code.index(index, offsetBy: pattern.count)] == pattern else {
-        nextChar()
-        continue
-      }
+  for matcher in regexes {
+    var line = 1
+    var col  = 1
+    var lowerIndex = code.startIndex
+    
+    let matches = matcher.matches(
+      in: code,
+      options: [],
+      range: .init(location: 0, length: code.utf16.count))
+    for match in matches {
+      guard match.numberOfRanges >= 1 else { continue }
+      guard let swiftRange = Range(match.range(at: 1), in: code) else { continue }
+      let key = String(code[swiftRange])
       guard localizations.keys.contains(key) else {
+        if reportExactLocation {
+          for char in code[lowerIndex...swiftRange.lowerBound] {
+            if char.isNewline {
+              line += 1
+              col = 1
+            } else {
+              col += 1
+            }
+          }
+          lowerIndex = swiftRange.lowerBound
+        }
         violations.insert(.init(
           file: file,
           line: line,
-          column: column,
+          column: col,
           key: key,
           severity: severity))
-        nextChar()
         continue
       }
     }
-    nextChar()
   }
-  linesProcessedCount = line
+  
+  if benchmark {
+    // @NOTE: - This adds a bit of an overhead (~1.37x slower performance),
+    // but having lines of code counted enables throghput calculation.
+    for char in code {
+      if char.isNewline { linesProcessedCount += 1 }
+    }
+  }
+  
   return violations
 }
 
@@ -336,11 +355,6 @@ enum Reporters: String, ExpressibleByArgument, CaseIterable {
   }
 }
 
-enum ViolationSeverity: String, ExpressibleByArgument {
-  case warning
-  case error
-}
-
 public func benchmark(_ run: () throws -> Void) rethrows -> Double {
   let current = currentTime()
   try run()
@@ -379,10 +393,8 @@ fileprivate func currentTime() -> Double {
 }
 
 extension String {
-  var loadFile: String {
-    get throws {
-      let data = try Data(contentsOf: .init(fileURLWithPath: self))
-      return String(data: data, encoding: .utf8) ?? ""
-    }
+  func loadFile() throws -> String {
+    let data = try Data(contentsOf: .init(fileURLWithPath: self))
+    return String(data: data, encoding: .utf8) ?? ""
   }
 }
