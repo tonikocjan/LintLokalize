@@ -4,6 +4,19 @@ Validate localizations in your project.
 
 ## Installation
 
+First, clone the project:
+
+```bash
+~ git clone https://github.com/tonikocjan/LintLokalize
+Cloning into 'LintLokalize'...
+remote: Enumerating objects: 40, done.
+remote: Counting objects: 100% (40/40), done.
+remote: Compressing objects: 100% (30/30), done.
+remote: Total 40 (delta 9), reused 29 (delta 6), pack-reused 0
+Receiving objects: 100% (40/40), 11.21 KiB | 2.80 MiB/s, done.
+Resolving deltas: 100% (9/9), done.
+```
+
 Build:
 
 ```bash
@@ -64,7 +77,8 @@ To integrate `LintLokalize` into XCode, create a new Run Script:
 if which LintLokalize > /dev/null; then
   LintLokalize Path/To/Localization/Localizable.strings
 else
-  echo "warning: LintLokalize not installed"
+  echo "warning: LintLokalize not installed. Install it by following the installation guide at `https://github.com/tonikocjan/LintLokalize`."
+  # echo "error: LintLokalize not installed. Install it by following the installation guide at `https://github.com/tonikocjan/LintLokalize`." 
 fi
 ```
 
@@ -100,7 +114,7 @@ When doing so, XCode will mark the build as failed if any localization is unreso
 
 
 ```bash
-MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --reporter cmh
+MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --reporter cmg
 1. Processing:  MyProject/File1.swift
 2. Processing:  MyProject/File2.swift
 3. Processing:  MyProject/File3.swift
