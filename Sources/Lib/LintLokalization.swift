@@ -13,7 +13,7 @@ public struct Main: ParsableCommand {
   var patterns: [String] = [#"NSLocalizedString\("([^"]*)""#, #""([^"]*)".localized"#]
   
   @Option(help: "Should XCode display warnings or compile-time errors.")
-  var severity: ViolationSeverity = .warning
+  var severity: Violation.Severity = .warning
   
   @Option(help: "Should the reporter output violations as they are found or must all the violations be collected before generating a report.")
   var realtime: Bool = true // @TODO: - Not yet used
@@ -119,7 +119,7 @@ public struct Main: ParsableCommand {
       }
       
       for _ in 0..<threads { semaphore.wait() }
-      precondition(results.allSatisfy { $0 != nil })
+      assert(results.allSatisfy { $0 != nil })
       
       var errorCount = 0
       var processedLinesCount = 0
@@ -139,7 +139,7 @@ public struct Main: ParsableCommand {
     }
     
     guard benchmarkMode else {
-      Foundation.exit(Int32(output.errorCount))
+      Foundation.exit(Int32(severity == .error ? output.errorCount : 0))
     }
     print(
       [
@@ -204,13 +204,16 @@ func loadLocalizationFile(
       var keyEndIndex: String.Index
       index = contentsOfFile.index(after: index)
       keyStartIndex = index
-      while contentsOfFile[index] != "\"" {
+      while contentsOfFile.endIndex != index && contentsOfFile[index] != "\"" {
         index = contentsOfFile.index(after: index)
       }
+      
+      if index == contentsOfFile.endIndex { break }
+
       keyEndIndex = index
       index = contentsOfFile.index(after: index)
       
-      while contentsOfFile[index] != "\"" {
+      while contentsOfFile.endIndex != index && contentsOfFile[index] != "\"" {
         index = contentsOfFile.index(after: index)
       }
       
@@ -247,19 +250,23 @@ struct Violation: Hashable {
   let line: Int
   let column: Int
   let key: String
-  let severity: ViolationSeverity
+  let severity: Severity
 }
 
-enum ViolationSeverity: String, ExpressibleByArgument {
-  case warning
-  case error
+extension Violation {
+  enum Severity: String, ExpressibleByArgument {
+    case warning
+    case error
+  }
 }
 
 func parseAndValidateSourceCodeFile(
   file: String,
   localizations: [String: String],
+  // @TODO: - Once Swift 5.7 is available, use the new Regex API:
+  // https://www.hackingwithswift.com/swift/5.7/regexes
   regexes: [NSRegularExpression],
-  severity: ViolationSeverity,
+  severity: Violation.Severity,
   reportExactLocation: Bool,
   linesProcessedCount: inout Int,
   benchmark: Bool
@@ -332,12 +339,13 @@ struct XCodeReporter: Reporter {
 
 struct CommandLineReporter: Reporter {
   func report(violation: Violation) -> String {
-    [
-      "  ⚠️  ",
+    let str = [
+      violation.severity == .error ? "  ❗️  " : "  ⚠️  ",
       "[\(violation.line),\(violation.column)] ",
       "\(violation.file): ",
       "Unknown key: \(violation.key)",
-    ].joined(separator: "").red
+    ].joined(separator: "")
+    return violation.severity == .warning ? str.yellow : str.red
   }
 }
 
