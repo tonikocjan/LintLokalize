@@ -292,28 +292,29 @@ func parseAndValidateSourceCodeFile(
       range: .init(location: 0, length: code.utf16.count))
     for match in matches {
       guard match.numberOfRanges >= 1 else { continue }
-      guard let swiftRange = Range(match.range(at: 1), in: code) else { continue }
-      let key = String(code[swiftRange])
-      guard localizations.keys.contains(key) else {
-        if reportExactLocation {
-          for char in code[lowerIndex...swiftRange.lowerBound] {
-            if char.isNewline {
-              line += 1
-              col = 1
-            } else {
-              col += 1
-            }
+      guard let range = Range(match.range(at: 1), in: code) else { continue }
+      
+      let key = String(code[range])
+      guard !localizations.keys.contains(key) else { continue }
+      
+      if reportExactLocation {
+        for char in code[lowerIndex...range.lowerBound] {
+          if char.isNewline {
+            line += 1
+            col = 1
+          } else {
+            col += 1
           }
-          lowerIndex = swiftRange.lowerBound
         }
-        violations.insert(.init(
-          file: file,
-          line: line,
-          column: col,
-          key: key,
-          severity: severity))
-        continue
+        lowerIndex = range.lowerBound
       }
+      violations.insert(.init(
+        file: file,
+        line: line,
+        column: col,
+        key: key,
+        severity: severity)
+      )
     }
   }
   

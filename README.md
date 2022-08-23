@@ -114,7 +114,7 @@ When doing so, XCode will mark the build as failed if any localization is unreso
 
 
 ```bash
-MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --reporter cmg
+MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --reporter cmd
 1. Processing:  MyProject/File1.swift
 2. Processing:  MyProject/File2.swift
 3. Processing:  MyProject/File3.swift
@@ -126,5 +126,25 @@ MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --r
 7. Processing:  MyProject/File7.swift
 8. Processing:  MyProject/File8.swift
 [50,86] MyProject/File8.swift: Unknown key: localization_key3
+❗️ Found 3 unresolved localizations!
+```
+
+* ** Github Actions **
+
+You can integrate `LintLokalize` into Github CI pipeline by usind the `github` reporter:
+
+```bash
+MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --reporter github
+1. Processing:  MyProject/File1.swift
+2. Processing:  MyProject/File2.swift
+3. Processing:  MyProject/File3.swift
+::warning file=MyProject/File3.swift,line=86,col=31::Unknown localization key: localization_key1
+::warning file=MyProject/File3.swift,line=86,col=31::Unknown localization key: localization_key2
+4. Processing:  MyProject/File4.swift
+5. Processing:  MyProject/File5.swift
+6. Processing:  MyProject/File6.swift
+7. Processing:  MyProject/File7.swift
+8. Processing:  MyProject/File8.swift
+::warning file=MyProject/File4.swift,line=86,col=31::Unknown localization key: localization_key3
 ❗️ Found 3 unresolved localizations!
 ```
