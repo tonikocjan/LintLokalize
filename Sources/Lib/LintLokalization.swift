@@ -338,7 +338,7 @@ struct XCodeReporter: Reporter {
       "\(violation.file):",
       "\(violation.line):\(violation.column): ",
       "\(violation.severity.rawValue): ",
-      "Unknown key: ",
+      "Unknown localization key: ",
       violation.key
     ].joined(separator: "")
   }
@@ -356,9 +356,25 @@ struct CommandLineReporter: Reporter {
   }
 }
 
+struct GithubActionsReporter: Reporter {
+  func report(violation: Violation) -> String {
+    // ::(warning|error) file={name},line={line},endLine={endLine},title={title}::{message}
+    [
+      "::",
+      "\(violation.severity.rawValue) ",
+      "file=\(violation.file),",
+      "line=\(violation.line),",
+      "col=\(violation.column)::",
+      "Unknown localization key: ",
+      violation.key
+    ].joined(separator: "")
+  }
+}
+
 enum Reporters: String, ExpressibleByArgument, CaseIterable {
   case cmd
   case xcode
+  case github
   
   func get() -> Reporter {
     switch self {
@@ -366,6 +382,8 @@ enum Reporters: String, ExpressibleByArgument, CaseIterable {
       return CommandLineReporter()
     case .xcode:
       return XCodeReporter()
+    case .github:
+      return GithubActionsReporter()
     }
   }
 }
