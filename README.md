@@ -129,7 +129,7 @@ MyProject/ ~ LintLokalize Resources/Localization/en.lproj/Localizable.string --r
 ❗️ Found 3 unresolved localizations!
 ```
 
-* ** Github Actions **
+* __Github Actions__
 
 You can integrate `LintLokalize` into Github CI pipeline by usind the `github` reporter:
 
