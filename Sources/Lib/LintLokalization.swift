@@ -13,7 +13,7 @@ public struct Main: ParsableCommand {
   var patterns: [String] = [#"NSLocalizedString\("([^"]*)""#, #""([^"]*)".localized"#]
   
   @Option(help: "Should XCode display warnings or compile-time errors.")
-  var severity: ViolationSeverity = .warning
+  var severity: Violation.Severity = .warning
   
   @Option(help: "Should the reporter output violations as they are found or must all the violations be collected before generating a report.")
   var realtime: Bool = true // @TODO: - Not yet used
@@ -119,7 +119,7 @@ public struct Main: ParsableCommand {
       }
       
       for _ in 0..<threads { semaphore.wait() }
-      precondition(results.allSatisfy { $0 != nil })
+      assert(results.allSatisfy { $0 != nil })
       
       var errorCount = 0
       var processedLinesCount = 0
@@ -139,7 +139,7 @@ public struct Main: ParsableCommand {
     }
     
     guard benchmarkMode else {
-      Foundation.exit(Int32(output.errorCount))
+      Foundation.exit(Int32(severity == .error ? output.errorCount : 0))
     }
     print(
       [
@@ -204,13 +204,16 @@ func loadLocalizationFile(
       var keyEndIndex: String.Index
       index = contentsOfFile.index(after: index)
       keyStartIndex = index
-      while contentsOfFile[index] != "\"" {
+      while contentsOfFile.endIndex != index && contentsOfFile[index] != "\"" {
         index = contentsOfFile.index(after: index)
       }
+      
+      if index == contentsOfFile.endIndex { break }
+
       keyEndIndex = index
       index = contentsOfFile.index(after: index)
       
-      while contentsOfFile[index] != "\"" {
+      while contentsOfFile.endIndex != index && contentsOfFile[index] != "\"" {
         index = contentsOfFile.index(after: index)
       }
       
@@ -218,7 +221,14 @@ func loadLocalizationFile(
       var valueEndIndex: String.Index
       index = contentsOfFile.index(after: index)
       valueStartIndex = index
-      while contentsOfFile.endIndex != index && contentsOfFile[index] != "\"" {
+      while contentsOfFile.endIndex != index {
+        if contentsOfFile[index] == "\\" {
+          index = contentsOfFile.index(after: index)
+          if index != contentsOfFile.endIndex && contentsOfFile[index] == "\"" {
+            index = contentsOfFile.index(after: index)
+            continue
+          }
+        } else if contentsOfFile[index] == "\"" { break }
         index = contentsOfFile.index(after: index)
       }
       valueEndIndex = index
@@ -247,19 +257,23 @@ struct Violation: Hashable {
   let line: Int
   let column: Int
   let key: String
-  let severity: ViolationSeverity
+  let severity: Severity
 }
 
-enum ViolationSeverity: String, ExpressibleByArgument {
-  case warning
-  case error
+extension Violation {
+  enum Severity: String, ExpressibleByArgument {
+    case warning
+    case error
+  }
 }
 
 func parseAndValidateSourceCodeFile(
   file: String,
   localizations: [String: String],
+  // @TODO: - Once Swift 5.7 is available, use the new Regex API:
+  // https://www.hackingwithswift.com/swift/5.7/regexes
   regexes: [NSRegularExpression],
-  severity: ViolationSeverity,
+  severity: Violation.Severity,
   reportExactLocation: Bool,
   linesProcessedCount: inout Int,
   benchmark: Bool
@@ -278,28 +292,29 @@ func parseAndValidateSourceCodeFile(
       range: .init(location: 0, length: code.utf16.count))
     for match in matches {
       guard match.numberOfRanges >= 1 else { continue }
-      guard let swiftRange = Range(match.range(at: 1), in: code) else { continue }
-      let key = String(code[swiftRange])
-      guard localizations.keys.contains(key) else {
-        if reportExactLocation {
-          for char in code[lowerIndex...swiftRange.lowerBound] {
-            if char.isNewline {
-              line += 1
-              col = 1
-            } else {
-              col += 1
-            }
+      guard let range = Range(match.range(at: 1), in: code) else { continue }
+      
+      let key = String(code[range])
+      guard !localizations.keys.contains(key) else { continue }
+      
+      if reportExactLocation {
+        for char in code[lowerIndex...range.lowerBound] {
+          if char.isNewline {
+            line += 1
+            col = 1
+          } else {
+            col += 1
           }
-          lowerIndex = swiftRange.lowerBound
         }
-        violations.insert(.init(
-          file: file,
-          line: line,
-          column: col,
-          key: key,
-          severity: severity))
-        continue
+        lowerIndex = range.lowerBound
       }
+      violations.insert(.init(
+        file: file,
+        line: line,
+        column: col,
+        key: key,
+        severity: severity)
+      )
     }
   }
   
@@ -324,7 +339,7 @@ struct XCodeReporter: Reporter {
       "\(violation.file):",
       "\(violation.line):\(violation.column): ",
       "\(violation.severity.rawValue): ",
-      "Unknown key: ",
+      "Unknown localization key: ",
       violation.key
     ].joined(separator: "")
   }
@@ -332,18 +347,35 @@ struct XCodeReporter: Reporter {
 
 struct CommandLineReporter: Reporter {
   func report(violation: Violation) -> String {
-    [
-      "  ⚠️  ",
+    let str = [
+      violation.severity == .error ? "  ❗️  " : "  ⚠️  ",
       "[\(violation.line),\(violation.column)] ",
       "\(violation.file): ",
       "Unknown key: \(violation.key)",
-    ].joined(separator: "").red
+    ].joined(separator: "")
+    return violation.severity == .warning ? str.yellow : str.red
+  }
+}
+
+struct GithubActionsReporter: Reporter {
+  func report(violation: Violation) -> String {
+    // ::(warning|error) file={name},line={line},endLine={endLine},title={title}::{message}
+    [
+      "::",
+      "\(violation.severity.rawValue) ",
+      "file=\(violation.file),",
+      "line=\(violation.line),",
+      "col=\(violation.column)::",
+      "Unknown localization key: ",
+      violation.key
+    ].joined(separator: "")
   }
 }
 
 enum Reporters: String, ExpressibleByArgument, CaseIterable {
   case cmd
   case xcode
+  case github
   
   func get() -> Reporter {
     switch self {
@@ -351,6 +383,8 @@ enum Reporters: String, ExpressibleByArgument, CaseIterable {
       return CommandLineReporter()
     case .xcode:
       return XCodeReporter()
+    case .github:
+      return GithubActionsReporter()
     }
   }
 }
